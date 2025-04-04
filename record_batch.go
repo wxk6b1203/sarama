@@ -6,7 +6,10 @@ import (
 	"time"
 )
 
-const recordBatchOverhead = 49
+const (
+	logOverhead         = 12
+	recordBatchOverhead = 49
+)
 
 type recordsArray []*Record
 
@@ -48,6 +51,7 @@ type RecordBatch struct {
 	PartialTrailingRecord bool
 	IsTransactional       bool
 
+	rawBatchLength    int
 	compressedRecords []byte
 	recordsLen        int // uncompressed records size
 }
@@ -166,6 +170,7 @@ func (b *RecordBatch) decode(pd packetDecoder) (err error) {
 	}
 
 	bufSize := int(batchLen) - recordBatchOverhead
+	b.rawBatchLength = int(batchLen) + logOverhead
 	recBuffer, err := pd.getRawBytes(bufSize)
 	if err != nil {
 		if errors.Is(err, ErrInsufficientData) {

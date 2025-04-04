@@ -8,6 +8,21 @@ type RecordBatchHeader struct {
 	RecordSize int
 }
 
+func decodeRecordHeader(pd packetDecoder) (*RecordBatchHeader, error) {
+	header := &RecordBatchHeader{}
+	if err := header.decode(pd); err != nil {
+		return nil, err
+	}
+
+	return header, nil
+}
+
+// DecodeBatchHeader decodes the RecordBatchHeader from the given raw byte slice.
+func DecodeBatchHeader(raw []byte, offset int) (*RecordBatchHeader, error) {
+	handle := &realDecoder{raw: raw, off: offset, stack: make([]pushDecoder, 0)}
+	return decodeRecordHeader(handle)
+}
+
 // encode encodes the RecordBatchHeader into the given packetEncoder.
 // Note that this method does not include the CRC32 checksum and
 // length field for the records.
