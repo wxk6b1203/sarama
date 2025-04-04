@@ -45,6 +45,9 @@ func (b *RecordBatchHeader) encode(pe packetEncoder) error {
 	return nil
 }
 
+// decode decodes the RecordBatchHeader from the given packetDecoder.
+// Note that this method does not include the CRC32 checksum and
+// length field for the records.
 func (b *RecordBatchHeader) decode(pd packetDecoder) (err error) {
 	if b.FirstOffset, err = pd.getInt64(); err != nil {
 		return err
@@ -65,10 +68,8 @@ func (b *RecordBatchHeader) decode(pd packetDecoder) (err error) {
 		return err
 	}
 
-	crc32Decoder := acquireCrc32Field(crcCastagnoli)
-	defer releaseCrc32Field(crc32Decoder)
-
-	if err = pd.push(crc32Decoder); err != nil {
+	_, err = pd.getInt32()
+	if err != nil {
 		return err
 	}
 
