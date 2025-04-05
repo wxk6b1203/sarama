@@ -1,11 +1,18 @@
 package sarama
 
+import "os"
+
 type RecordBatchReader interface {
 }
 
 type byteRecordBatchReader struct {
 	raw []byte
 	off int
+}
+
+type fileRecordBatchReader struct {
+	// file is the underlying file handle
+	file *os.File
 }
 
 func NewRecordBatchReader(raw []byte, off int) RecordBatchReader {
