@@ -2,6 +2,7 @@ package sarama
 
 import (
 	"encoding/binary"
+	"fmt"
 	"github.com/rcrowley/go-metrics"
 	"io"
 	"math"
@@ -15,7 +16,7 @@ type fileDecoder struct {
 }
 
 func NewFileDecoder(pathname string, direction bool, registry metrics.Registry) (packetDecoder, error) {
-	file, err := os.OpenFile(pathname, os.O_RDONLY, 0)
+	file, err := OpenFile(pathname, direction, os.O_RDONLY, 0600)
 	if err != nil {
 		return nil, err
 	}
@@ -34,7 +35,32 @@ func (fd *fileDecoder) seek(pos int64) (int64, error) {
 	}
 }
 
+// withPosSaver 保存当前文件位置，执行函数，如果出错则恢复到原来位置
+func withPosSaver[T any](fd *fileDecoder, fn func() (T, error)) (T, error) {
+	var defaultT T
+	pos, err := fd.file.Seek(0, io.SeekCurrent)
+	if err != nil {
+		return defaultT, err
+	}
+
+	result, err := fn()
+	if err != nil {
+		_, seekErr := fd.seek(pos)
+		if seekErr != nil {
+			// 如果恢复位置也失败，记录到原始错误中
+			return defaultT, fmt.Errorf("original error: %w, failed to restore position: %v", err, seekErr)
+		}
+	}
+	return result, err
+}
+
 func (fd *fileDecoder) getInt8() (int8, error) {
+	return withPosSaver(fd, func() (int8, error) {
+		return fd.getInt8Raw()
+	})
+}
+
+func (fd *fileDecoder) getInt8Raw() (int8, error) {
 	buf := make([]byte, 1)
 	cnt, err := fd.file.Read(buf)
 	if err != nil {
@@ -47,6 +73,12 @@ func (fd *fileDecoder) getInt8() (int8, error) {
 }
 
 func (fd *fileDecoder) getInt16() (int16, error) {
+	return withPosSaver(fd, func() (int16, error) {
+		return fd.getInt16Raw()
+	})
+}
+
+func (fd *fileDecoder) getInt16Raw() (int16, error) {
 	buf := make([]byte, 2)
 	cnt, err := fd.file.Read(buf)
 	if err != nil {
@@ -60,6 +92,12 @@ func (fd *fileDecoder) getInt16() (int16, error) {
 }
 
 func (fd *fileDecoder) getInt32() (int32, error) {
+	return withPosSaver(fd, func() (int32, error) {
+		return fd.getInt32Raw()
+	})
+}
+
+func (fd *fileDecoder) getInt32Raw() (int32, error) {
 	buf := make([]byte, 4)
 	cnt, err := fd.file.Read(buf)
 	if err != nil {
@@ -74,6 +112,12 @@ func (fd *fileDecoder) getInt32() (int32, error) {
 }
 
 func (fd *fileDecoder) getInt64() (int64, error) {
+	return withPosSaver(fd, func() (int64, error) {
+		return fd.getInt64Raw()
+	})
+}
+
+func (fd *fileDecoder) getInt64Raw() (int64, error) {
 	buf := make([]byte, 8)
 	cnt, err := fd.file.Read(buf)
 	if err != nil {
@@ -88,6 +132,12 @@ func (fd *fileDecoder) getInt64() (int64, error) {
 }
 
 func (fd *fileDecoder) getVarint() (int64, error) {
+	return withPosSaver(fd, func() (int64, error) {
+		return fd.getVarintRaw()
+	})
+}
+
+func (fd *fileDecoder) getVarintRaw() (int64, error) {
 	buf := make([]byte, 10)
 	cnt, err := fd.file.Read(buf)
 	if err != nil {
@@ -108,6 +158,12 @@ func (fd *fileDecoder) getVarint() (int64, error) {
 }
 
 func (fd *fileDecoder) getUVarint() (uint64, error) {
+	return withPosSaver(fd, func() (uint64, error) {
+		return fd.getUVarintRaw()
+	})
+}
+
+func (fd *fileDecoder) getUVarintRaw() (uint64, error) {
 	buf := make([]byte, 10)
 	cnt, err := fd.file.Read(buf)
 	if err != nil {
@@ -128,6 +184,12 @@ func (fd *fileDecoder) getUVarint() (uint64, error) {
 }
 
 func (fd *fileDecoder) getFloat64() (float64, error) {
+	return withPosSaver(fd, func() (float64, error) {
+		return fd.getFloat64Raw()
+	})
+}
+
+func (fd *fileDecoder) getFloat64Raw() (float64, error) {
 	buf := make([]byte, 8)
 	cnt, err := fd.file.Read(buf)
 	if err != nil {
@@ -140,8 +202,14 @@ func (fd *fileDecoder) getFloat64() (float64, error) {
 	return tmp, nil
 }
 
-// TODO: validate array length
 func (fd *fileDecoder) getArrayLength() (int, error) {
+	return withPosSaver(fd, func() (int, error) {
+		return fd.getArrayLengthRaw()
+	})
+}
+
+// TODO: validate array length
+func (fd *fileDecoder) getArrayLengthRaw() (int, error) {
 	buf := make([]byte, 4)
 	cnt, err := fd.file.Read(buf)
 	if err != nil {
@@ -152,6 +220,9 @@ func (fd *fileDecoder) getArrayLength() (int, error) {
 	}
 
 	tmp := int(int32(binary.BigEndian.Uint32(buf)))
+	if tmp > int(MaxResponseSize) {
+		return -1, errInvalidArrayLength
+	}
 	return tmp, nil
 }
 
@@ -169,6 +240,12 @@ func (fd *fileDecoder) getCompactArrayLength() (int, error) {
 }
 
 func (fd *fileDecoder) getBool() (bool, error) {
+	return withPosSaver(fd, func() (bool, error) {
+		return fd.getBoolRaw()
+	})
+}
+
+func (fd *fileDecoder) getBoolRaw() (bool, error) {
 	b, err := fd.getInt8()
 	if err != nil || b == 0 {
 		return false, err
@@ -180,6 +257,12 @@ func (fd *fileDecoder) getBool() (bool, error) {
 }
 
 func (fd *fileDecoder) getEmptyTaggedFieldArray() (int, error) {
+	return withPosSaver(fd, func() (int, error) {
+		return fd.getEmptyTaggedFieldArrayRaw()
+	})
+}
+
+func (fd *fileDecoder) getEmptyTaggedFieldArrayRaw() (int, error) {
 	tagCount, err := fd.getUVarint()
 	if err != nil {
 		return 0, err
@@ -208,6 +291,12 @@ func (fd *fileDecoder) getEmptyTaggedFieldArray() (int, error) {
 // collections
 
 func (fd *fileDecoder) getBytes() ([]byte, error) {
+	return withPosSaver(fd, func() (bytes []byte, err error) {
+		return fd.getBytesRaw()
+	})
+}
+
+func (fd *fileDecoder) getBytesRaw() ([]byte, error) {
 	tmp, err := fd.getInt32()
 	if err != nil {
 		return nil, err
@@ -218,7 +307,14 @@ func (fd *fileDecoder) getBytes() ([]byte, error) {
 
 	return fd.getRawBytes(int(tmp))
 }
+
 func (fd *fileDecoder) getVarintBytes() ([]byte, error) {
+	return withPosSaver(fd, func() (bytes []byte, err error) {
+		return fd.getVarintBytesRaw()
+	})
+}
+
+func (fd *fileDecoder) getVarintBytesRaw() ([]byte, error) {
 	tmp, err := fd.getVarint()
 	if err != nil {
 		return nil, err
@@ -231,6 +327,12 @@ func (fd *fileDecoder) getVarintBytes() ([]byte, error) {
 }
 
 func (fd *fileDecoder) getCompactBytes() ([]byte, error) {
+	return withPosSaver(fd, func() (bytes []byte, err error) {
+		return fd.getCompactBytesRaw()
+	})
+}
+
+func (fd *fileDecoder) getCompactBytesRaw() ([]byte, error) {
 	n, err := fd.getUVarint()
 	if err != nil {
 		return nil, err
@@ -257,7 +359,14 @@ func (fd *fileDecoder) getStringLength() (int, error) {
 
 	return n, nil
 }
+
 func (fd *fileDecoder) getString() (string, error) {
+	return withPosSaver(fd, func() (string, error) {
+		return fd.getStringRaw()
+	})
+}
+
+func (fd *fileDecoder) getStringRaw() (string, error) {
 	n, err := fd.getStringLength()
 	if err != nil || n == -1 {
 		return "", err
@@ -276,6 +385,12 @@ func (fd *fileDecoder) getString() (string, error) {
 }
 
 func (fd *fileDecoder) getNullableString() (*string, error) {
+	return withPosSaver(fd, func() (*string, error) {
+		return fd.getNullableStringRaw()
+	})
+}
+
+func (fd *fileDecoder) getNullableStringRaw() (*string, error) {
 	n, err := fd.getStringLength()
 	if err != nil || n == -1 {
 		return nil, err
@@ -296,6 +411,12 @@ func (fd *fileDecoder) getNullableString() (*string, error) {
 }
 
 func (fd *fileDecoder) getCompactString() (string, error) {
+	return withPosSaver(fd, func() (string, error) {
+		return fd.getCompactStringRaw()
+	})
+}
+
+func (fd *fileDecoder) getCompactStringRaw() (string, error) {
 	n, err := fd.getUVarint()
 	if err != nil {
 		return "", err
@@ -317,7 +438,14 @@ func (fd *fileDecoder) getCompactString() (string, error) {
 	tmpStr := string(buf)
 	return tmpStr, nil
 }
+
 func (fd *fileDecoder) getCompactNullableString() (*string, error) {
+	return withPosSaver(fd, func() (*string, error) {
+		return fd.getCompactNullableStringRaw()
+	})
+}
+
+func (fd *fileDecoder) getCompactNullableStringRaw() (*string, error) {
 	n, err := fd.getUVarint()
 	if err != nil {
 		return nil, err
@@ -343,6 +471,12 @@ func (fd *fileDecoder) getCompactNullableString() (*string, error) {
 }
 
 func (fd *fileDecoder) getCompactInt32Array() ([]int32, error) {
+	return withPosSaver(fd, func() ([]int32, error) {
+		return fd.getCompactInt32ArrayRaw()
+	})
+}
+
+func (fd *fileDecoder) getCompactInt32ArrayRaw() ([]int32, error) {
 	n, err := fd.getUVarint()
 	if err != nil {
 		return nil, err
@@ -368,6 +502,12 @@ func (fd *fileDecoder) getCompactInt32Array() ([]int32, error) {
 }
 
 func (fd *fileDecoder) getInt32Array() ([]int32, error) {
+	return withPosSaver(fd, func() ([]int32, error) {
+		return fd.getInt32ArrayRaw()
+	})
+}
+
+func (fd *fileDecoder) getInt32ArrayRaw() ([]int32, error) {
 	cnt, err := fd.getInt32()
 	if err != nil {
 		return nil, err
@@ -396,6 +536,12 @@ func (fd *fileDecoder) getInt32Array() ([]int32, error) {
 }
 
 func (fd *fileDecoder) getInt64Array() ([]int64, error) {
+	return withPosSaver(fd, func() ([]int64, error) {
+		return fd.getInt64ArrayRaw()
+	})
+}
+
+func (fd *fileDecoder) getInt64ArrayRaw() ([]int64, error) {
 	cnt, err := fd.getInt32()
 	if err != nil {
 		return nil, err
@@ -424,6 +570,12 @@ func (fd *fileDecoder) getInt64Array() ([]int64, error) {
 }
 
 func (fd *fileDecoder) getStringArray() ([]string, error) {
+	return withPosSaver(fd, func() ([]string, error) {
+		return fd.getStringArrayRaw()
+	})
+}
+
+func (fd *fileDecoder) getStringArrayRaw() ([]string, error) {
 	cnt, err := fd.getInt32()
 	if err != nil {
 		return nil, err
@@ -468,10 +620,16 @@ func (fd *fileDecoder) remaining() int {
 
 func (fd *fileDecoder) getSubset(length int) (packetDecoder, error) {
 	// TODO
-	return nil, nil
+	return fd, nil
 }
 
 func (fd *fileDecoder) getRawBytes(length int) ([]byte, error) {
+	return withPosSaver(fd, func() ([]byte, error) {
+		return fd.getRawBytesRaw(length)
+	})
+}
+
+func (fd *fileDecoder) getRawBytesRaw(length int) ([]byte, error) {
 	buf := make([]byte, length)
 	cnt, err := fd.file.Read(buf)
 	if err != nil {
@@ -485,10 +643,11 @@ func (fd *fileDecoder) getRawBytes(length int) ([]byte, error) {
 
 func (fd *fileDecoder) peek(offset, length int) (packetDecoder, error) {
 	// TODO
-	return nil, nil
+	return fd, nil
 }
 
 func (fd *fileDecoder) peekInt8(offset int) (int8, error) {
+	// FIXME: implement it
 	buf := make([]byte, 1)
 	cnt, err := fd.file.Read(buf)
 	if err != nil {
