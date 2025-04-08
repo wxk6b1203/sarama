@@ -98,7 +98,25 @@ func TestDefaultReader_Read(t *testing.T) {
 		t.Fatalf("Failed to create reader: %v", err)
 	}
 
-	defer reader.Close()
+	defer func(reader Reader) {
+		err := reader.Close()
+		if err != nil {
+			t.Fatalf("Failed to close reader: %v", err)
+		}
+	}(reader)
+
+	tp, err := reader.TopicMetadata()
+	if err != nil {
+		t.Fatalf("Failed to get topic metadata: %v", err)
+	}
+
+	if len(tp) == 0 {
+		t.Fatalf("Expected topic metadata, but got none")
+	}
+
+	for _, i := range tp {
+		t.Logf("Topic Metadata: %s", i)
+	}
 
 	resp, err := reader.Read("test-topic-1", 0, 122)
 	if err != nil {

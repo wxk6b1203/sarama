@@ -1,6 +1,9 @@
 package sarama
 
-import "time"
+import (
+	"fmt"
+	"time"
+)
 
 // PartitionMetadata contains each partition in the topic.
 type PartitionMetadata struct {
@@ -20,6 +23,10 @@ type PartitionMetadata struct {
 	Isr []int32
 	// OfflineReplicas contains the set of offline replicas of this partition.
 	OfflineReplicas []int32
+}
+
+func (p *PartitionMetadata) String() string {
+	return fmt.Sprintf("PartitionMetadata{Version: %d, Err: %s, ID: %d, Leader: %d, LeaderEpoch: %d, Replicas: %v, Isr: %v, OfflineReplicas: %v}", p.Version, p.Err, p.ID, p.Leader, p.LeaderEpoch, p.Replicas, p.Isr, p.OfflineReplicas)
 }
 
 func (p *PartitionMetadata) decode(pd packetDecoder, version int16) (err error) {
@@ -145,6 +152,10 @@ type TopicMetadata struct {
 	// Partitions contains each partition in the topic.
 	Partitions                []*PartitionMetadata
 	TopicAuthorizedOperations int32 // Only valid for Version >= 8
+}
+
+func (t *TopicMetadata) String() string {
+	return fmt.Sprintf("TopicMetadata{Version: %d, Err: %s, Name: %s, Uuid: %s, IsInternal: %t, Partitions: %v, TopicAuthorizedOperations: %d}", t.Version, t.Err, t.Name, t.Uuid, t.IsInternal, t.Partitions, t.TopicAuthorizedOperations)
 }
 
 func (t *TopicMetadata) decode(pd packetDecoder, version int16) (err error) {

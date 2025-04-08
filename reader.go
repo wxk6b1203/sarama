@@ -10,6 +10,7 @@ import (
 type Reader interface {
 	Close() error
 	Config() *Config
+	TopicMetadata() ([]*TopicMetadata, error)
 	// Read fetches a batch of messages from the given topic and partition, starting at the given offset.
 	// It returns a FetchResponse containing the messages and any errors encountered during the fetch.
 	Read(topic string, partition int32, offset int64) (*FetchResponse, error)
@@ -132,4 +133,16 @@ func (r *defaultReader) Read(topic string, partition int32, offset int64) (*Fetc
 	req.AddBlock(topic, partition, offset, r.conf.Consumer.Fetch.Max, epoch)
 
 	return leader.Fetch(req)
+}
+
+func (r *defaultReader) TopicMetadata() ([]*TopicMetadata, error) {
+	r.lock.Lock()
+	defer r.lock.Unlock()
+
+	metadata, err := r.client.TopicMetadata()
+	if err != nil {
+		return nil, err
+	}
+
+	return metadata, nil
 }

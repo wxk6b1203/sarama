@@ -124,6 +124,12 @@ type Client interface {
 
 	// Closed returns true if the client has already had Close called on it
 	Closed() bool
+
+	// TopicMetadata returns the set of available topics that are being
+	TopicMetadata() ([]*TopicMetadata, error)
+
+	// TopicMetadataByName returns the metadata for a specific topic
+	TopicMetadataByName(topic string) (*TopicMetadata, error)
 }
 
 const (
@@ -157,7 +163,7 @@ type client struct {
 	controllerID            int32                                   // cluster controller broker id
 	brokers                 map[int32]*Broker                       // maps broker ids to brokers
 	metadata                map[string]map[int32]*PartitionMetadata // maps topics to partition ids to metadata
-	metadataTopics          map[string]none                         // topics that need to collect metadata
+	metadataTopics          map[string]*TopicMetadata               // topics that need to collect metadata
 	coordinators            map[string]int32                        // Maps consumer group names to coordinating broker IDs
 	transactionCoordinators map[string]int32                        // Maps transaction ids to coordinating broker IDs
 
@@ -199,7 +205,7 @@ func NewClient(addrs []string, conf *Config) (Client, error) {
 		closed:                  make(chan none),
 		brokers:                 make(map[int32]*Broker),
 		metadata:                make(map[string]map[int32]*PartitionMetadata),
-		metadataTopics:          make(map[string]none),
+		metadataTopics:          make(map[string]*TopicMetadata),
 		cachedPartitionsResults: make(map[string][maxPartitionIndex][]int32),
 		coordinators:            make(map[string]int32),
 		transactionCoordinators: make(map[string]int32),
@@ -363,6 +369,38 @@ func (client *client) MetadataTopics() ([]string, error) {
 	}
 
 	return ret, nil
+}
+
+func (client *client) TopicMetadata() ([]*TopicMetadata, error) {
+	if client.Closed() {
+		return nil, ErrClosedClient
+	}
+
+	client.lock.RLock()
+	defer client.lock.RUnlock()
+
+	ret := make([]*TopicMetadata, 0, len(client.metadataTopics))
+	for _, topic := range client.metadataTopics {
+		ret = append(ret, topic)
+	}
+
+	return ret, nil
+}
+
+func (client *client) TopicMetadataByName(topic string) (*TopicMetadata, error) {
+	if client.Closed() {
+		return nil, ErrClosedClient
+	}
+
+	client.lock.RLock()
+	defer client.lock.RUnlock()
+
+	topicMetadata, ok := client.metadataTopics[topic]
+	if !ok {
+		return nil, ErrUnknownTopicOrPartition
+	}
+
+	return topicMetadata, nil
 }
 
 func (client *client) Partitions(topic string) ([]int32, error) {
@@ -1065,7 +1103,7 @@ func (client *client) updateMetadata(data *MetadataResponse, allKnownMetaData bo
 
 	if allKnownMetaData {
 		client.metadata = make(map[string]map[int32]*PartitionMetadata)
-		client.metadataTopics = make(map[string]none)
+		client.metadataTopics = make(map[string]*TopicMetadata)
 		client.cachedPartitionsResults = make(map[string][maxPartitionIndex][]int32)
 	}
 	for _, topic := range data.Topics {
@@ -1073,7 +1111,7 @@ func (client *client) updateMetadata(data *MetadataResponse, allKnownMetaData bo
 		// requested topics must be recorded to keep them trackable for periodically
 		// metadata refresh.
 		if _, exists := client.metadataTopics[topic.Name]; !exists {
-			client.metadataTopics[topic.Name] = none{}
+			client.metadataTopics[topic.Name] = topic
 		}
 		delete(client.metadata, topic.Name)
 		delete(client.cachedPartitionsResults, topic.Name)
